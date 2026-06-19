@@ -8,27 +8,102 @@
 
     <h2>AI Learning Agent</h2>
 
-    <button id="checkVideo">
+    <!-- <button id="checkVideo">
         Check Video
-    </button>
+    </button> -->
 
-    <div id="result"></div>
+    <!-- <div id="result"></div>
     <button id="captureFrame">
     Capture Frame
-</button>
+</button> -->
 
-<button id="pingBackend">
+<!-- <button id="pingBackend">
     Ping Backend
 </button>
 <button id="analyzeFrame">
     Analyze Frame
-</button>
+</button> -->
+<label>
+Capture Interval
+</label>
+
+<select id="captureInterval">
+
+    <option value="1000">
+        1 Second
+    </option>
+
+    <option value="3000">
+        3 Seconds
+    </option>
+
+    <option value="5000" selected>
+        5 Seconds
+    </option>
+
+    <option value="10000">
+        10 Seconds
+    </option>
+
+    <option value="15000">
+        15 Seconds
+    </option>
+
+    <option value="30000">
+        30 Seconds
+    </option>
+
+    <option value="60000">
+        1 Minute
+    </option>
+
+</select>
+
+<br><br>
+
 <button id="startSession">
     Start Session
 </button>
 
 <button id="stopSession">
     Stop Session
+</button>
+
+<!-- <button id="testAudio">
+    Test Audio
+</button> -->
+
+<!-- <hr> -->
+
+<!-- <h3>Ask Notes</h3>
+
+<textarea
+    id="question"
+    rows="4"
+    cols="30"
+></textarea> -->
+
+<!-- <br><br>
+
+<button id="askBtn">
+    Ask
+</button>
+
+<button id="generateQuiz">
+    Generate Quiz
+</button>
+
+<div id="quizOutput"></div> -->
+
+<button id="generateNotes">
+    Generate Notes
+</button>
+
+<div id="notesStatus"></div>
+<div id="answer"></div>
+
+<button id="downloadNotes">
+    Download Notes
 </button>
 
     <script src="popup.js"></script>

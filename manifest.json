@@ -4,13 +4,18 @@
   "version": "1.0",
   "description": "Analyze lectures and generate notes",
   "permissions": [
-    "activeTab",
-    "scripting",
-    "tabs"
-  ],
+  "activeTab",
+  "scripting",
+  "tabs",
+  "tabCapture",
+  "storage"
+],
   "host_permissions": [
     "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html"
   }
