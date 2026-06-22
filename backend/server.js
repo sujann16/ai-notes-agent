@@ -4,6 +4,7 @@ const { Ollama } = require("ollama");
 const PDFDocument = require("pdfkit");
 const fs = require("fs");
 const path = require("path");
+const multer = require("multer");
 
 const { exec } =
     require("child_process");
@@ -14,6 +15,44 @@ const {
 
 const ollama = new Ollama({
     host: "http://127.0.0.1:11434"
+});
+
+const storage =
+multer.diskStorage({
+
+    destination:
+    (
+        req,
+        file,
+        cb
+    ) => {
+
+        cb(
+            null,
+            "audio/"
+        );
+
+    },
+
+    filename:
+    (
+        req,
+        file,
+        cb
+    ) => {
+
+        cb(
+            null,
+            "lecture.webm"
+        );
+
+    }
+
+});
+
+const audioUpload =
+multer({
+    storage
 });
 
 const app = express();
@@ -344,6 +383,24 @@ app.post("/save-frame", async (req, res) => {
     }
 
 });
+
+app.post(
+    "/upload-audio",
+    audioUpload.single("audio"),
+    (req,res) => {
+
+        console.log(
+            "Audio saved:",
+            req.file.path
+        );
+
+        res.json({
+            success:true,
+            file:req.file.path
+        });
+
+    }
+);
 
 app.post("/generate-notes", async (req, res) => {
 
@@ -722,6 +779,62 @@ app.get("/download-pdf", (req, res) => {
         doc.text(notes);
 
         doc.end();
+
+    } catch(err) {
+
+        console.error(err);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
+app.post("/cleanup-session", (req, res) => {
+
+    try {
+
+        const framesDir =
+            path.join(
+                __dirname,
+                "uploads",
+                "frames"
+            );
+
+        if(fs.existsSync(framesDir)) {
+
+            fs.readdirSync(framesDir)
+            .forEach(file => {
+
+                fs.unlinkSync(
+                    path.join(
+                        framesDir,
+                        file
+                    )
+                );
+
+            });
+
+        }
+
+        const audioFile =
+            path.join(
+                __dirname,
+                "audio",
+                "lecture.mp3"
+            );
+
+        if(fs.existsSync(audioFile)) {
+
+            fs.unlinkSync(audioFile);
+
+        }
+
+        res.json({
+            success: true
+        });
 
     } catch(err) {
 
