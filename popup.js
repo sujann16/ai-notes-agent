@@ -334,10 +334,17 @@ async function captureAndSendFrame() {
 
 // });
 
-document.getElementById("startSession").addEventListener("click", () => {
+document.getElementById("startSession").addEventListener("click", async () => {
   if (sessionActive) return;
 
   sessionActive = true;
+
+  try {
+    await fetch("http://localhost:3000/cleanup-session", { method: "POST" });
+    console.log("Old session data cleaned up successfully");
+  } catch (err) {
+    console.error("Auto-cleanup failed:", err);
+  }
 
   const interval = Number(document.getElementById("captureInterval").value);
 
@@ -351,10 +358,17 @@ Capture Every ${interval / 1000} sec`;
 
   captureAndSendFrame();
 
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  const tabId = tab ? tab.id : null;
+
   chrome.runtime.sendMessage(
     {
       action: "startSession",
       interval: interval,
+      tabId: tabId,
     },
     (response) => {
       console.log(response);
@@ -377,12 +391,6 @@ document.getElementById("stopSession").addEventListener("click", () => {
       console.log(response);
     },
   );
-
-  if (mediaRecorder) {
-    mediaRecorder.stop();
-
-    console.log("Recording stopped");
-  }
 
   document.getElementById("result").innerText = "Session Stopped";
 });
@@ -540,7 +548,7 @@ document.getElementById("generateNotes").addEventListener("click", async () => {
 
 document.getElementById("downloadNotes").addEventListener("click", () => {
   chrome.tabs.create({
-    url: "http://localhost:3000/download-pdf",
+    url: "http://localhost:3000/download-pdf?t=" + Date.now(),
   });
 });
 

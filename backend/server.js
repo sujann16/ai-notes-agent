@@ -26,10 +26,13 @@ multer.diskStorage({
         file,
         cb
     ) => {
-
+        const dir = path.join(__dirname, "audio");
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
         cb(
             null,
-            "audio/"
+            dir
         );
 
     },
@@ -414,9 +417,15 @@ app.post("/generate-notes", async (req, res) => {
                 "frames"
             );
 
-        const files =
-            fs.readdirSync(framesDir)
-              .slice(0, 2);
+        const files = fs.readdirSync(framesDir)
+            .filter(file => file.endsWith(".jpg"))
+            .map(name => ({
+                name,
+                time: fs.statSync(path.join(framesDir, name)).mtime.getTime()
+            }))
+            .sort((a, b) => a.time - b.time)
+            .map(f => f.name)
+            .slice(-3);
 
         let summaries = [];
 
@@ -453,7 +462,7 @@ const transcript =
         path.join(
             __dirname,
             "audio",
-            "lecture.mp3"
+            "lecture.webm"
         )
     );
 
@@ -487,7 +496,7 @@ const transcript =
    );
     
     await runScript(
-        "node chunk-notes.js"
+        `node "${path.join(__dirname, "chunk-notes.js")}"`
     );
     
     console.log(
@@ -499,7 +508,7 @@ const transcript =
     );
     
     await runScript(
-        "node embed-notes.js"
+        `node "${path.join(__dirname, "embed-notes.js")}"`
     );  
     
     console.log(
@@ -705,7 +714,7 @@ app.post(
                     path.join(
                         __dirname,
                         "audio",
-                        "lecture.mp3"
+                        "lecture.webm"
                     )
                 );
 
@@ -727,6 +736,367 @@ app.post(
 
     }
 );
+
+function cleanUnicode(text) {
+    if (!text) return "";
+    return text
+        .replace(/💡/g, "Tip: ")
+        .replace(/❌/g, " [X] ")
+        .replace(/✅/g, " [OK] ")
+        .replace(/→/g, "->")
+        .replace(/➔/g, "->")
+        .replace(/⇒/g, "=>")
+        .replace(/•/g, "*")
+        .replace(/[\u2018\u2019]/g, "'") // smart quotes
+        .replace(/[\u201C\u201D]/g, '"') // smart double quotes
+        .replace(/[^\x00-\x7F]/g, ""); // strip any remaining non-ASCII characters to prevent rendering boxes/garbage
+}
+
+function checkPageSpace(doc, neededSpace) {
+    const bottomMargin = 50;
+    const pageHeight = doc.page.height;
+    if (doc.y + neededSpace > pageHeight - bottomMargin) {
+        doc.addPage();
+    }
+}
+
+function parseInlineStyles(text) {
+    const spans = [];
+    const tokenRegex = /(\*\*|\*)/g;
+    let currentBold = false;
+    let currentItalic = false;
+    
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = tokenRegex.exec(text)) !== null) {
+        const token = match[0];
+        const index = match.index;
+        
+        if (index > lastIndex) {
+            spans.push({
+                text: text.substring(lastIndex, index),
+                bold: currentBold,
+                italic: currentItalic
+            });
+        }
+        
+        if (token === '**') {
+            currentBold = !currentBold;
+        } else if (token === '*') {
+            currentItalic = !currentItalic;
+        }
+        
+        lastIndex = tokenRegex.lastIndex;
+    }
+    
+    if (lastIndex < text.length) {
+        spans.push({
+            text: text.substring(lastIndex),
+            bold: currentBold,
+            italic: currentItalic
+        });
+    }
+    
+    if (spans.length === 0 && text.length > 0) {
+        spans.push({ text, bold: false, italic: false });
+    }
+    
+    return spans.filter(s => s.text !== '');
+}
+
+function renderSpans(doc, spans, options = {}) {
+    spans.forEach((span, idx) => {
+        let font = 'Helvetica';
+        if (span.bold && span.italic) {
+            font = 'Helvetica-BoldOblique';
+        } else if (span.bold) {
+            font = 'Helvetica-Bold';
+        } else if (span.italic) {
+            font = 'Helvetica-Oblique';
+        }
+        
+        doc.font(font);
+        
+        const isLast = idx === spans.length - 1;
+        const textOptions = {
+            continued: !isLast,
+            ...options
+        };
+        doc.text(span.text, textOptions);
+    });
+}
+
+function renderHeading(doc, text, size, color, gapBefore) {
+    // Check for size + gapBefore + 70 to prevent orphan headings at bottom of page
+    checkPageSpace(doc, size + gapBefore + 70);
+    doc.moveDown(gapBefore / 10);
+    const cleanText = text.replace(/\*\*/g, '');
+    doc.fontSize(size).fillColor(color).font('Helvetica-Bold');
+    doc.text(cleanText);
+    doc.moveDown(0.3);
+}
+
+function renderHorizontalRule(doc) {
+    checkPageSpace(doc, 20);
+    doc.moveDown(0.5);
+    doc.strokeColor('#e2e8f0')
+       .lineWidth(1)
+       .moveTo(50, doc.y)
+       .lineTo(562, doc.y)
+       .stroke();
+    doc.moveDown(0.5);
+}
+
+function renderBlockquote(doc, text) {
+    const padding = 10;
+    const width = 512;
+    
+    doc.font('Helvetica').fontSize(10);
+    const spans = parseInlineStyles(text);
+    const plainText = spans.map(s => s.text).join('');
+    const textHeight = doc.heightOfString(plainText, { width: width - (padding * 2) - 10 });
+    const blockHeight = textHeight + (padding * 2);
+    
+    checkPageSpace(doc, blockHeight + 10);
+    
+    const startX = 50;
+    const startY = doc.y;
+    
+    doc.fillColor('#f7fafc')
+       .rect(startX, startY, width, blockHeight)
+       .fill();
+       
+    doc.strokeColor('#2b6cb0')
+       .lineWidth(4)
+       .moveTo(startX, startY)
+       .lineTo(startX, startY + blockHeight)
+       .stroke();
+       
+    doc.x = startX + padding + 4;
+    doc.y = startY + padding;
+    
+    const italicSpans = spans.map(s => ({ ...s, italic: true }));
+    renderSpans(doc, italicSpans, { width: width - (padding * 2) - 10 });
+    
+    doc.x = 50;
+    doc.y = startY + blockHeight;
+    doc.moveDown(0.8);
+}
+
+function renderListItem(doc, marker, content, indentLevel) {
+    const leftMargin = 50;
+    const indent = 15 + (indentLevel * 10);
+    const contentWidth = 512 - indent;
+    
+    doc.font('Helvetica').fontSize(10);
+    const textHeight = doc.heightOfString(content, { width: contentWidth });
+    checkPageSpace(doc, textHeight + 5);
+    
+    const startY = doc.y;
+    
+    let cleanMarker = marker;
+    if (marker === '-' || marker === '*') {
+        cleanMarker = '•';
+    }
+    
+    doc.font('Helvetica-Bold').fillColor('#2d3748');
+    doc.text(cleanMarker, leftMargin + indent - 15, startY);
+    
+    doc.x = leftMargin + indent;
+    doc.y = startY;
+    
+    const spans = parseInlineStyles(content);
+    renderSpans(doc, spans, { width: contentWidth });
+    
+    doc.x = leftMargin;
+    doc.moveDown(0.3);
+}
+
+function renderParagraph(doc, text) {
+    const spans = parseInlineStyles(text);
+    const plainText = spans.map(s => s.text).join('');
+    
+    doc.font('Helvetica').fontSize(10);
+    const textHeight = doc.heightOfString(plainText, { width: 512 });
+    checkPageSpace(doc, textHeight + 10);
+    
+    doc.fillColor('#2d3748');
+    renderSpans(doc, spans, { width: 512 });
+    doc.moveDown(0.5);
+}
+
+function renderTable(doc, tableLines) {
+    const rows = [];
+    tableLines.forEach(line => {
+        const trimmed = line.trim();
+        if (trimmed.includes('---') && !trimmed.startsWith('|')) return;
+        if (trimmed.startsWith('|') && trimmed.includes('---')) return;
+        
+        const cells = trimmed.split('|')
+            .map(c => c.trim())
+            .filter((c, index, arr) => index > 0 && index < arr.length - 1);
+            
+        if (cells.length > 0) {
+            rows.push(cells);
+        }
+    });
+    
+    if (rows.length === 0) return;
+    
+    const numCols = rows[0].length;
+    const startX = 50;
+    const totalWidth = 512;
+    
+    const colWidths = [];
+    if (numCols === 2) {
+        colWidths.push(150, 362);
+    } else if (numCols === 3) {
+        colWidths.push(110, 240, 162);
+    } else {
+        const evenWidth = totalWidth / numCols;
+        for (let j = 0; j < numCols; j++) {
+            colWidths.push(evenWidth);
+        }
+    }
+    
+    const cellPadding = 8;
+    
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const isHeader = r === 0;
+        
+        let rowHeight = 0;
+        doc.font(isHeader ? 'Helvetica-Bold' : 'Helvetica').fontSize(9);
+        
+        for (let c = 0; c < Math.min(row.length, numCols); c++) {
+            const cellText = row[c].replace(/\*\*/g, '');
+            const innerWidth = colWidths[c] - (cellPadding * 2);
+            const cellHeight = doc.heightOfString(cellText, { width: innerWidth });
+            if (cellHeight > rowHeight) {
+                rowHeight = cellHeight;
+            }
+        }
+        
+        rowHeight += cellPadding * 2;
+        
+        checkPageSpace(doc, rowHeight + 10);
+        
+        const currentY = doc.y;
+        
+        if (isHeader) {
+            doc.fillColor('#2c3e50')
+               .rect(startX, currentY, totalWidth, rowHeight)
+               .fill();
+        } else if (r % 2 === 1) {
+            doc.fillColor('#f8fafc')
+               .rect(startX, currentY, totalWidth, rowHeight)
+               .fill();
+        }
+        
+        let currentX = startX;
+        for (let c = 0; c < Math.min(row.length, numCols); c++) {
+            const cellText = row[c];
+            const cellW = colWidths[c];
+            
+            doc.x = currentX + cellPadding;
+            doc.y = currentY + cellPadding;
+            
+            doc.fontSize(9);
+            if (isHeader) {
+                doc.fillColor('#ffffff').font('Helvetica-Bold');
+                doc.text(cellText, { width: cellW - (cellPadding * 2) });
+            } else {
+                doc.fillColor('#2d3748');
+                const spans = parseInlineStyles(cellText);
+                renderSpans(doc, spans, { width: cellW - (cellPadding * 2) });
+            }
+            
+            currentX += cellW;
+        }
+        
+        doc.strokeColor('#e2e8f0')
+           .lineWidth(0.5)
+           .moveTo(startX, currentY + rowHeight)
+           .lineTo(startX + totalWidth, currentY + rowHeight)
+           .stroke();
+           
+        doc.x = startX;
+        doc.y = currentY + rowHeight;
+    }
+    
+    doc.moveDown(0.8);
+}
+
+function drawMarkdown(doc, markdown) {
+    const lines = markdown.split('\n');
+    let i = 0;
+    while (i < lines.length) {
+        let line = lines[i];
+        let trimmed = line.trim();
+        
+        if (trimmed === '') {
+            doc.moveDown(0.3);
+            i++;
+            continue;
+        }
+        
+        if (trimmed.startsWith('>')) {
+            let quoteLines = [];
+            while (i < lines.length && lines[i].trim().startsWith('>')) {
+                quoteLines.push(lines[i].trim().substring(1).trim());
+                i++;
+            }
+            renderBlockquote(doc, quoteLines.join(' '));
+            continue;
+        }
+        
+        if (trimmed.startsWith('|')) {
+            let tableLines = [];
+            while (i < lines.length && lines[i].trim().startsWith('|')) {
+                tableLines.push(lines[i].trim());
+                i++;
+            }
+            renderTable(doc, tableLines);
+            continue;
+        }
+        
+        if (trimmed === '---' || trimmed === '***' || trimmed === '___') {
+            renderHorizontalRule(doc);
+            i++;
+            continue;
+        }
+        
+        if (trimmed.startsWith('# ')) {
+            renderHeading(doc, trimmed.substring(2), 20, '#1a365d', 12);
+            i++;
+            continue;
+        }
+        if (trimmed.startsWith('## ')) {
+            renderHeading(doc, trimmed.substring(3), 16, '#2c5282', 10);
+            i++;
+            continue;
+        }
+        if (trimmed.startsWith('### ')) {
+            renderHeading(doc, trimmed.substring(4), 12, '#2d3748', 8);
+            i++;
+            continue;
+        }
+        
+        const bulletMatch = line.match(/^(\s*)([-*]|\d+\.)\s+(.*)/);
+        if (bulletMatch) {
+            const indentLevel = bulletMatch[1].length;
+            const marker = bulletMatch[2];
+            const content = bulletMatch[3];
+            renderListItem(doc, marker, content, indentLevel);
+            i++;
+            continue;
+        }
+        
+        renderParagraph(doc, trimmed);
+        i++;
+    }
+}
 
 app.get("/download-pdf", (req, res) => {
 
@@ -753,8 +1123,18 @@ app.get("/download-pdf", (req, res) => {
                 "utf8"
             );
 
+        const cleanedNotes = cleanUnicode(notes);
+
         const doc =
-            new PDFDocument();
+            new PDFDocument({
+                margin: 50,
+                bufferPages: true
+            });
+
+        res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        res.setHeader("Pragma", "no-cache");
+        res.setHeader("Expires", "0");
+        res.setHeader("Surrogate-Control", "no-store");
 
         res.setHeader(
             "Content-Type",
@@ -768,15 +1148,39 @@ app.get("/download-pdf", (req, res) => {
 
         doc.pipe(res);
 
-        doc.fontSize(20);
-        doc.text(
-            "AI Learning Agent Notes"
-        );
+        // Header Title (on page 1)
+        doc.fillColor('#1a365d').font('Helvetica-Bold').fontSize(22).text("AI Lecture Notes", { align: 'center' });
+        doc.moveDown(0.3);
+        doc.strokeColor('#1a365d').lineWidth(2).moveTo(50, doc.y).lineTo(562, doc.y).stroke();
+        doc.moveDown(1);
 
-        doc.moveDown();
+        // Draw parsed markdown
+        drawMarkdown(doc, cleanedNotes);
 
-        doc.fontSize(12);
-        doc.text(notes);
+        // Draw page numbers and headers/footers on all pages
+        const pages = doc.bufferedPageRange();
+        for (let i = 0; i < pages.count; i++) {
+            doc.switchToPage(i);
+            
+            // Temporarily set margins to 0 to prevent auto-page break
+            const oldBottomMargin = doc.page.margins.bottom;
+            doc.page.margins.bottom = 0;
+            
+            // Draw header
+            doc.fontSize(8).fillColor('#718096').font('Helvetica');
+            doc.text("AI LECTURE STUDY NOTES", 50, 20, { width: 512, align: 'left' });
+            doc.text("GENERATED BY LEARNING AGENT", 50, 20, { width: 512, align: 'right' });
+            
+            // Thin line
+            doc.strokeColor('#e2e8f0').lineWidth(0.5).moveTo(50, 32).lineTo(562, 32).stroke();
+            
+            // Draw footer
+            doc.strokeColor('#e2e8f0').lineWidth(0.5).moveTo(50, 750).lineTo(562, 750).stroke();
+            doc.text(`Page ${i + 1} of ${pages.count}`, 50, 760, { width: 512, align: 'center' });
+            
+            // Restore margins
+            doc.page.margins.bottom = oldBottomMargin;
+        }
 
         doc.end();
 
@@ -823,7 +1227,7 @@ app.post("/cleanup-session", (req, res) => {
             path.join(
                 __dirname,
                 "audio",
-                "lecture.mp3"
+                "lecture.webm"
             );
 
         if(fs.existsSync(audioFile)) {
@@ -831,6 +1235,27 @@ app.post("/cleanup-session", (req, res) => {
             fs.unlinkSync(audioFile);
 
         }
+
+        // Also clean up any generated notes, chunks and embeddings
+        const filesToDelete = [
+            path.join(__dirname, "lecture-notes.md"),
+            path.join(__dirname, "chunks.json"),
+            path.join(__dirname, "embeddings.json"),
+            "lecture-notes.md",
+            "chunks.json",
+            "embeddings.json"
+        ];
+
+        filesToDelete.forEach(filePath => {
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log(`Cleaned up file: ${filePath}`);
+                } catch (e) {
+                    console.error(`Error deleting ${filePath}:`, e.message);
+                }
+            }
+        });
 
         res.json({
             success: true
