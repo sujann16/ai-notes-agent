@@ -1,0 +1,8 @@
+node_modules/
+.env
+frames/
+sessions/
+uploads/
+*.webm
+*.wav
+*.mp3
