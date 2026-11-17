@@ -6,23 +6,22 @@ function transcribeAudio(audioPath) {
 
     return new Promise(
         (resolve, reject) => {
-
             exec(
                 `python3 "${scriptPath}" "${audioPath}"`,
                 (error, stdout, stderr) => {
-
                     if (error) {
-
                         reject(error);
                         return;
-
                     }
 
-                    resolve(stdout);
-
+                    try {
+                        const parsed = JSON.parse(stdout);
+                        resolve(parsed);
+                    } catch (e) {
+                        resolve([{ start: 0, end: 9999, text: stdout.trim() }]);
+                    }
                 }
             );
-
         }
     );
 }
